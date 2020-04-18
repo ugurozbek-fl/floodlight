@@ -24,6 +24,7 @@ import net.floodlightcontroller.routing.BroadcastTree;
 import net.floodlightcontroller.routing.Path;
 import net.floodlightcontroller.routing.PathId;
 import net.floodlightcontroller.statistics.SwitchPortBandwidth;
+import net.floodlightcontroller.topology.tunahan.*;
 import net.floodlightcontroller.util.ClusterDFS;
 import org.projectfloodlight.openflow.protocol.OFPortDesc;
 import org.projectfloodlight.openflow.types.DatapathId;
@@ -441,60 +442,6 @@ public class TopologyInstance {
         return portsBroadcastAll.contains(npt);
     }
 
-    private class NodeDist implements Comparable<NodeDist> {
-        private final DatapathId node;
-        public DatapathId getNode() {
-            return node;
-        }
-
-        private final int dist;
-        public int getDist() {
-            return dist;
-        }
-
-        public NodeDist(DatapathId node, int dist) {
-            this.node = node;
-            this.dist = dist;
-        }
-
-        @Override
-        public int compareTo(NodeDist o) {
-            if (o.dist == this.dist) {
-                return (int)(this.node.getLong() - o.node.getLong());
-            }
-            return this.dist - o.dist;
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj)
-                return true;
-            if (obj == null)
-                return false;
-            if (getClass() != obj.getClass())
-                return false;
-            NodeDist other = (NodeDist) obj;
-            if (!getOuterType().equals(other.getOuterType()))
-                return false;
-            if (node == null) {
-                if (other.node != null)
-                    return false;
-            } else if (!node.equals(other.node))
-                return false;
-            return true;
-        }
-
-        @Override
-        public int hashCode() {
-            assert false : "hashCode not designed";
-        return 42;
-        }
-
-        private TopologyInstance getOuterType() {
-            return TopologyInstance.this;
-        }
-    }
-
     protected void identifyArchipelagos() {
         // Iterate through each external link and create/merge archipelagos based on the
         // islands that each link is connected to
@@ -578,72 +525,77 @@ public class TopologyInstance {
     private BroadcastTree dijkstra(Map<DatapathId, Set<Link>> links, DatapathId root,
             Map<Link, Integer> linkCost,
             boolean isDstRooted) {
-        HashMap<DatapathId, Link> nexthoplinks = new HashMap<DatapathId, Link>();
-        HashMap<DatapathId, Integer> cost = new HashMap<DatapathId, Integer>();
+        HashMap<DatapathId, Link> nexthoplinks = new HashMap<DatapathId, Link>(); // liste. her bir ID(node) ye karşılık next link verisi
+        HashMap<DatapathId, Integer> cost = new HashMap<DatapathId, Integer>(); // liste. her bir node ID sine karşılık bir integer değer
+        //links -> bir liste. her bir node ID sine karşılık link listesi.( bir link = bir bağlantı)
         int w;
 
-        for (DatapathId node : links.keySet()) {
-            nexthoplinks.put(node, null);
+        for (DatapathId node : links.keySet()) {// tüm nodları sonsuz yapıyor bi en başta
+            nexthoplinks.put(node, null); // dönecek olan veriler nextHopLinks ve cost. İkisini de ilklendiriyor.
             cost.put(node, MAX_PATH_WEIGHT);
             //log.debug("Added max cost to {}", node);
         }
 
-        HashMap<DatapathId, Boolean> seen = new HashMap<DatapathId, Boolean>();
-        PriorityQueue<NodeDist> nodeq = new PriorityQueue<NodeDist>();
-        nodeq.add(new NodeDist(root, 0));
+        HashMap<DatapathId, Boolean> seen = new HashMap<DatapathId, Boolean>(); // node ID sine karşılık boolean tutan liste
+        PriorityQueue<NodeDist> nodeq = new PriorityQueue<NodeDist>(); // kuyruk veri yapısı. bir NodeDist =node ID ve int Distance bilgisi
+        nodeq.add(new NodeDist(root, 0));//nodeq döngü ile döndüğümüz kuyruk veriyapısı. ilk başlangıç olarak root veriyoruz
+        //UNSETTLED
         cost.put(root, 0);
 
-        //log.debug("{}", links);
+//        log.debug("{}", links);
 
-        while (nodeq.peek() != null) {
-            NodeDist n = nodeq.poll();
-            DatapathId cnode = n.getNode();
-            int cdist = n.getDist();
+        //döngünün başladığı yer. "nodeq" yu dönüp duruyoruz.
+        while (nodeq.peek() != null) { // boş olmadığı sürece devam et
+            NodeDist n = nodeq.poll(); //ilk olarak root geliyor. NodeDist ID ve distance ikilisiydi
+            DatapathId cnode = n.getNode(); //cnode ile bu ikiliden ID yi alıyor. cnode eşittir CURRENT ID
+            int cdist = n.getDist();// root ile başlayarak komşu node ların distance lerini alıyor. Sanırım root tan uzaklığına bakıyor.
 
             if (cdist >= MAX_PATH_WEIGHT) break;
-            if (seen.containsKey(cnode)) continue;
+            if (seen.containsKey(cnode)) continue;//bir nodu işlemeden önce seen olarak işliyoruz.
             seen.put(cnode, true);
 
-            //log.debug("cnode {} and links {}", cnode, links.get(cnode));
-            if (links.get(cnode) == null) continue;
-            for (Link link : links.get(cnode)) {
+            log.info("cnode {} and links {}", cnode, links.get(cnode));
+            if (links.get(cnode) == null) continue; // current node da bağlı link yoksa bir sonrakine next yap
+            for (Link link : links.get(cnode)) { //o anlik incelediği node'un sıra ile linklerini geziyor LINK
                 DatapathId neighbor;
-
-                if (isDstRooted == true) {
-                    neighbor = link.getSrc();
+                if (isDstRooted == true) { // hep true
+                    neighbor = link.getSrc(); // source ID alıyor. Ama source burada kendisi değil mi ? S1
                 } else {
                     neighbor = link.getDst();
                 }
 
                 // links directed toward cnode will result in this condition
-                if (neighbor.equals(cnode)) continue;
+                if (neighbor.equals(cnode)) continue;  //?3 cevabı sanırım
 
-                if (seen.containsKey(neighbor)) continue;
-
-                if (linkCost == null || linkCost.get(link) == null) {
+                if (seen.containsKey(neighbor)) continue; // komşuya gidilmişse gitme
+                // settled ve unsettled olması konusu seen den çıkıyor. seen i filtre olarak kullanıyor.
+                //settled = unsettled - seen gibi.
+                if (linkCost == null || linkCost.get(link) == null) { //n. düğümün m. linkine bakıyoruz olsun.
                     w = 1;
                 } else {
                     w = linkCost.get(link);
                 }
-
+                //w = link maliyeti dedik.
+                // ndist ise şudurr: n. düğümün roota olan min maliyeti A olsun. A+a1, A+a2 ... yaparak n+1. düğümün
+                // maliyetinden daha iyi bir maaliyet var mı diye bakıyor.
                 int ndist = cdist + w; // the weight of the link, always 1 in current version of floodlight.
                 log.debug("Neighbor: {}", neighbor);
                 log.debug("Cost: {}", cost);
-                log.debug("Neighbor cost: {}", cost.get(neighbor));
+                log.debug("Neighbor cost:MAX_PATH_WEIGHT {}", cost.get(neighbor));
 
-                if (ndist < cost.get(neighbor)) {
-                    cost.put(neighbor, ndist);
-                    nexthoplinks.put(neighbor, link);
-
-                    NodeDist ndTemp = new NodeDist(neighbor, ndist);
-                    // Remove an object that's already in there.
-                    // Note that the comparison is based on only the node id,
-                    // and not node id and distance.
+                if (ndist < cost.get(neighbor)) {  //cost.get(neighbor) --> o ana kadar hesaplanmış cost ile şimdi bulunanı kıyaslıyor.
+                    cost.put(neighbor, ndist); //buldu tabi daha iyisi, hemen koyuyor cost a
+                    // baeldung sitesindeki C-25, D24 gibi.
+                    nexthoplinks.put(neighbor, link); // buldu tabi daha iyisini, ekliyor A dan sonra ŞU LİNKE gidelim diye koyuyor.
+                    //NodeDist ID ve distance ikilisine tutan obje.
+                    NodeDist ndTemp = new NodeDist(neighbor, ndist); //yeni ID-DISTANCE objesi oluşturuluyor.
+                    // C noktası ROOT tan 15 uzakta gibi anladım.. Link bilgisi yok.
+                    //yoksa ekleme, varsa güncelleme. ama seen e eklendi bir kere.
                     nodeq.remove(ndTemp);
-                    // add the current object to the queue.
                     nodeq.add(ndTemp);
-                }
-            }
+
+                }// daha iyi bir yol bulundunun if kapanması
+            } // o anlik incelenen node a bağlı linklerin tek tek geziminin bitmesi
         }
 
         BroadcastTree ret = new BroadcastTree(nexthoplinks, cost);
@@ -699,12 +651,13 @@ public class TopologyInstance {
                     if (link == null) {
                         continue;
                     }
-                    if ((int)link.getLatency().getValue() < 0 || 
-                            (int)link.getLatency().getValue() > MAX_LINK_WEIGHT) {
-                        linkCost.put(link, MAX_LINK_WEIGHT);
-                    } else {
-                        linkCost.put(link,(int)link.getLatency().getValue());
-                    }
+                    initiateGivenMapWithGivenRange(linkCost, link, 400);
+//                    if ((int)link.getLatency().getValue() < 0 ||
+//                            (int)link.getLatency().getValue() > MAX_LINK_WEIGHT) {
+//                        linkCost.put(link, MAX_LINK_WEIGHT);
+//                    } else {
+//                        linkCost.put(link,(int)link.getLatency().getValue());
+//                    }
                 }
             }
             return linkCost;
@@ -775,6 +728,32 @@ public class TopologyInstance {
                 }
             }
             return linkCost;
+        }
+    }
+    public Map<Link, Integer> initLinkBandWith() {
+        Map<Link, Integer> bandWith = new HashMap<Link, Integer>();
+        for (NodePortTuple npt : links.keySet()) {
+            if (links.get(npt) == null) {
+                continue;
+            }
+            for (Link link : links.get(npt)) {
+                if (link == null) {
+                    continue;
+                }
+                initiateGivenMapWithGivenRange(bandWith, link, 250);
+            }
+        }
+        return bandWith;
+    }
+
+    private void initiateGivenMapWithGivenRange(Map<Link, Integer> givenMap, Link link, int i) {
+        Random r = new Random();
+        int randomValue = r.nextInt(i) + 5;
+        givenMap.put(link, randomValue);
+        for (Link link1 : givenMap.keySet()) {
+            if (link1.getDst().getLong() == link.getSrc().getLong() && link1.getSrc().getLong() == link.getDst().getLong()) {
+                givenMap.put(link, givenMap.get(link1));
+            }
         }
     }
 
@@ -994,6 +973,7 @@ public class TopologyInstance {
 
         // Find link costs
         Map<Link, Integer> linkCost = initLinkCostMap();
+        Map<Link, Integer> linkBandWith = initLinkBandWith(); /* band width of every link in entire topology */
 
         Map<DatapathId, Set<Link>> linkDpidMap = buildLinkDpidMap(switches, portsWithLinks, links);
 
@@ -1020,8 +1000,38 @@ public class TopologyInstance {
             return A;
         }
 
+        /**         Tunahan
+         *         Bu metodun altında tüm algoritmalar çalışım txt dosyasına sonuçları export etmektedir.
+         *         belirli düğümler arasında çalıştırıyoruz ki belirli o düğümleri bulsun
+         */
+        new AlgorithmExecutor().runAlgorithms(src, dst, linkCost, linkBandWith, copyOfLinkDpidMap);
+
         /* Use Dijkstra's to find the shortest path, which will also be the first path in A */
-        BroadcastTree bt = dijkstra(copyOfLinkDpidMap, dst, linkCost, true);
+        BroadcastTree bt = null;
+
+        /**
+         *         Burada ise genelde iperf komutunu test etmek için
+         *         Bazı durumlarda  yol hesaplamasının imkansız olduğu tutarsız veriler Floodlight'ın diğer modüllerinden bu modülüne gelmektedir.
+         *         Böyle durumlarda hesaplama anında null pointer v.s. alınmaktadır. Ama algoritmadaki bir eksiklik değidir. Çok sayıda yapılan
+         *         testlerinden ardından bu gözlemlenmiştir.
+         */
+
+        if (src.getLong() > 0 && dst.getLong() > 0 && src.getLong() != dst.getLong()) {
+            try {
+//                bt =   new BellmanFordAlgorithm(0).findPath(copyOfLinkDpidMap, dst,      linkCost ,true,  linkBandWith);
+//                bt =      new DijkstraAlgorithm(0).findPath(copyOfLinkDpidMap, dst,      linkCost , true ,linkBandWith);
+//                bt =       new AuctionAlgorithm(0).findPath(copyOfLinkDpidMap, src, dst, linkCost ,       linkBandWith);
+//                bt =    new DualAscentAlgorithm(0).findPath(copyOfLinkDpidMap, src, dst, linkCost ,       linkBandWith);
+//                bt = new FordFulkersonAlgorithm(0).findPath(copyOfLinkDpidMap, src, dst, linkCost ,       linkBandWith);
+            } catch (Exception ex) {
+                System.out.println("errr findPath" + ex.getMessage());
+            }
+        }
+
+        if(bt == null)
+        {
+            bt = dijkstra(copyOfLinkDpidMap, dst, linkCost, true);
+        }
         /* add this initial tree as our archipelago's broadcast tree (aSrc == aDst) */
         aSrc.setBroadcastTree(bt);
         /* now add the shortest path */
