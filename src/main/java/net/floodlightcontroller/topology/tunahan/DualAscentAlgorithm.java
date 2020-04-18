@@ -25,6 +25,7 @@ public class DualAscentAlgorithm {
     Long tempDualCost = 0L;
     Map<Link, Integer> linkCost;
     int siwCount = 0;
+
     private long maxId = -1;
     protected HashSet<Link> treeHash;
     protected Integer cost;
